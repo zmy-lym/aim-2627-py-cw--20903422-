@@ -36,12 +36,31 @@ class Facing(Enum):
 # ---------------------------------------------------------------------------
 def hp_ratio(hp, max_hp):
     """TODO(Q1)：血量百分比，返回 0-100 的 int；计算与边界规则见题面 Q1 规范。"""
-    raise NotImplementedError("Q1 hp_ratio：题面 Q1·血量百分比与精度保障")
+    if max_hp <=0:
+        raise ValueError("max_hp 必须为正数")
+    if hp < 0:
+        raise ValueError("hp 必须为非负数")
+    if hp > max_hp:
+        raise ValueError("hp 不能大于 max_hp")
+    return int(hp /max_hp * 100)
 
 
 def status_report(name, robot_type, hp, max_hp, battery):
     """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
-    raise NotImplementedError("Q1 status_report：题面 Q1·电量映射与报告格式")
+    if not isinstance(name, str) or not isinstance(robot_type, str):
+        raise TypeError ("name 和 robot_type 必须为字符串")
+    if not isinstance(hp, int) or not isinstance(max_hp, int) or not isinstance(battery, int):
+        raise TypeError("hp、max_hp 和 battery 必须为整数")
+    if battery < 0 or battery > 100:
+        raise ValueError("battery 必须在 0-100 之间")
+    if battery > 50:
+        gear = "OK"
+    elif battery > 20:
+        gear = "WARNING"
+    else:
+        gear = "LOW"
+    return f"{name:<10}|{robot_type:^10}|HP {hp_ratio(hp, max_hp):>3}%|BAT {battery:>3}%|{gear}"
+
 
 
 # ---------------------------------------------------------------------------
@@ -50,7 +69,91 @@ def status_report(name, robot_type, hp, max_hp, battery):
 def analyze_damage_log(lines):
     """TODO(Q2)：解析混合格式伤害日志，返回固定契约的统计 dict；
     行格式、去重与统计口径见题面 Q2 规范。"""
-    raise NotImplementedError("Q2 analyze_damage_log：题面 Q2·多源日志解析与统计")
+    total_damage = 0
+    by_armor = {"front": 0,"left": 0,"right": 0}
+    seen_id = set()
+    event_count = 0
+    for line in lines:
+        s = line.strip()
+        if len(s) ==0 or s.startswith("#"):
+            continue
+        if s.startswith("{"):
+            try:
+                data= json.loads(s)
+                if "armor" not in data or "damage" not in data or "id" not in data:
+                    continue
+                armor = data["armor"]
+                damage = data["damage"]
+                if armor not in ["front", "left", "right"]:
+                    continue
+                if not isinstance(damage, int) or damage < 0:
+                    continue
+                if "id" in data:
+                    event_id = data["id"]
+                    if event_id in seen_id:
+                        continue
+                    seen_id.add(event_id)
+                total_damage += damage
+                by_armor[armor] += damage
+                event_count += 1
+            except Exception:
+                continue
+        else:
+            parts = s.split()
+            valid_sensor = True
+            temp_dict = {"front":0, "left":0, "right":0}
+            for p in parts:
+                seg = p.strip()
+                if ":" not in seg:
+                    valid_sensor = False
+                    break
+                key_str, val_str = seg.split(":", 1)
+                key_str = key_str.strip()
+                val_str = val_str.strip()
+                if not val_str.isdigit():
+                    valid_sensor = False
+                    break
+                dmg = int(val_str)
+                if dmg <= 0:
+                    valid_sensor = False
+                    break
+                if key_str == "F":
+                    temp_dict["front"] += dmg
+                elif key_str == "L":
+                    temp_dict["left"] += dmg
+                elif key_str == "R":
+                    temp_dict["right"] += dmg
+                else:
+                    valid_sensor = False
+                    break
+            if not valid_sensor:
+                continue
+            for pos in ["front","left","right"]:
+                d = temp_dict[pos]
+                if d > 0:
+                    total += d
+                    by_armor[pos] += d
+                    event_count +=1
+        most_hit = None
+        avg = 0.0
+        if event_count > 0:
+            avg = total_damage / event_count
+            max_val = max(by_armor.values())
+            if max_val > 0:
+                if by_armor["front"] == max_val:
+                    most_hit = "front"
+                elif by_armor["left"] == max_val:
+                    most_hit = "left"
+                else:
+                    most_hit = "right"
+
+    result = {
+        "total": total,
+        "by_armor": by_armor,
+        "most_hit": most_hit,
+        "avg": avg
+    }
+    return result
 
 
 # ---------------------------------------------------------------------------
