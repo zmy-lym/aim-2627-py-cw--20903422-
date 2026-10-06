@@ -11,6 +11,7 @@
 - `python main.py`（或 PYTHONPATH=src python -m main）可看 ASCII 演示。
 """
 import json
+from collections import deque
 from enum import Enum
 
 
@@ -519,8 +520,34 @@ def report_to_json(stats):
 # Bonus：BFS 全局最短路（题面 Bonus·BFS 语义与排行榜）
 # ---------------------------------------------------------------------------
 def bfs_path_length(start, target, obstacles):
-    """TODO(Bonus)：BFS 全局最短路步数；返回语义与边界职责见题面 Bonus 规范。"""
-    raise NotImplementedError("Bonus bfs_path_length")
+    """TODO(Bonus)：BFS 全局最短路步数；返回语义与边界职责见题面 Bonus 规范。
+
+    start == target 恒返回 0；目标不可达返回 -1。
+    与工具参考实现（tools 的 bfs_len）一致：start 视为可通行起点，
+    即使它与障碍物重合也照常向外搜索。
+    地图边界由调用方放进 obstacles（题面 Bonus 规范 2）；
+    visited 集合保证搜索必然终止。
+    """
+    start = tuple(start)
+    target = tuple(target)
+    if start == target:
+        return 0
+    blocked = obstacles if isinstance(obstacles, set) else set(obstacles)
+    if target in blocked:
+        # 等价于搜索耗尽返回 -1；无边界环时兼防无限扩散
+        return -1
+    queue = deque([(start, 0)])
+    seen = {start}
+    while queue:
+        (x, y), dist = queue.popleft()
+        for nxt in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+            if nxt in blocked or nxt in seen:
+                continue
+            if nxt == target:
+                return dist + 1
+            seen.add(nxt)
+            queue.append((nxt, dist + 1))
+    return -1
 
 
 # ---------------------------------------------------------------------------
