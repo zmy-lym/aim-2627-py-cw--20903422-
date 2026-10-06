@@ -249,7 +249,7 @@ class SentryGrid:
         if pos in self._obstacles:
             raise ValueError("current_pos 不能位于障碍物上")
         self._pos = pos
-               
+
     def move_forward(self):
         """TODO(Q3)：朝当前 facing 前进一格，返回执行后的位置；
         碰撞、耗电与断电语义见题面 Q3 规范。"""
@@ -293,8 +293,29 @@ class SentryGrid:
 def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
     """TODO(Q4)：返回下一步应朝向的 Facing；
     候选判定、优先级与回退规则见题面 Q4 规范。"""
-    raise NotImplementedError("Q4 next_step_toward：题面 Q4·贪心策略与回退")
+    x,y = pos
+    tx, ty = target
+    dx = tx - x
+    dy = ty - y
+    before = abs(dx) + abs(dy)
+    if before == 0:
+        return current_facing
+    x_dir = Facing.RIGHT if dx > 0 else Facing.LEFT 
+    y_dir = Facing.UP if dy > 0 else Facing.DOWN
+    axis_order =("x","y") if abs(dx) >= abs(dy) else ("y","x")
+    for axis in axis_order:
+        if axis =='x'and dx == 0:
+            continue
+        if axis =='y'and dy == 0:
+            continue
+        facing = x_dir if axis == "x" else y_dir
+        fx, fy = facing.delta
+        nxt = (x + fx, y + fy)
+        after = abs(nxt[0] - tx) + abs(nxt[1] - ty)
+        if after < before and nxt not in obstacles:
+            return facing
 
+    return current_facing
 
 # ---------------------------------------------------------------------------
 # Q5 哨兵决策机（题面 Q5·裁判系统决策规则表）
