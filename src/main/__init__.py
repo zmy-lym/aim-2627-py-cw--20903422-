@@ -45,6 +45,7 @@ def hp_ratio(hp, max_hp):
         raise ValueError("max_hp 必须为正数")
     ratio = hp / max_hp * 100  # 防御式规范化：越界值夹回 0-100（题面 Q5 口径）
     return max(0, min(100, int(ratio)))
+# 夹紧结果，保证百分比落在0‑100区间，防止异常输入溢出
 
 
 def status_report(name, robot_type, hp, max_hp, battery):
