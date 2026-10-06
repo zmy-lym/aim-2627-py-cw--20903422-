@@ -36,124 +36,130 @@ class Facing(Enum):
 # ---------------------------------------------------------------------------
 def hp_ratio(hp, max_hp):
     """TODO(Q1)：血量百分比，返回 0-100 的 int；计算与边界规则见题面 Q1 规范。"""
-    if max_hp <=0:
+    if not isinstance(hp, (int, float)) or isinstance(hp, bool):
+        raise TypeError("hp 必须为数值")
+    if not isinstance(max_hp, (int, float)) or isinstance(max_hp, bool):
+        raise TypeError("max_hp 必须为数值")
+    if max_hp <= 0:
         raise ValueError("max_hp 必须为正数")
-    if hp < 0:
-        raise ValueError("hp 必须为非负数")
-    if hp > max_hp:
-        raise ValueError("hp 不能大于 max_hp")
-    return int(hp /max_hp * 100)
+    ratio = hp / max_hp * 100  # 防御式规范化：越界值夹回 0-100（题面 Q5 口径）
+    return max(0, min(100, int(ratio)))
 
 
 def status_report(name, robot_type, hp, max_hp, battery):
     """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
     if not isinstance(name, str) or not isinstance(robot_type, str):
-        raise TypeError ("name 和 robot_type 必须为字符串")
-    if not isinstance(hp, int) or not isinstance(max_hp, int) or not isinstance(battery, int):
-        raise TypeError("hp、max_hp 和 battery 必须为整数")
-    if battery < 0 or battery > 100:
-        raise ValueError("battery 必须在 0-100 之间")
+        raise TypeError("name 和 robot_type 必须为字符串")
+    pct = hp_ratio(hp, max_hp)  # hp/max_hp 合法性与规范化统一交给 hp_ratio
+    battery = int(battery)
     if battery > 50:
         gear = "OK"
     elif battery > 20:
         gear = "WARNING"
     else:
         gear = "LOW"
-    return f"{name:<10}|{robot_type:^10}|HP {hp_ratio(hp, max_hp):>3}%|BAT {battery:>3}%|{gear}"
-
+    return f"{name:<10}|{robot_type:^10}|HP {pct:>3}%|BAT {battery:>3}%|{gear}"
 
 
 # ---------------------------------------------------------------------------
 # Q2 战斗日志分析（题面 Q2·多源日志解析与统计）
 # ---------------------------------------------------------------------------
+_SENSOR_KEY_TO_ARMOR = {"F": "front", "L": "left", "R": "right"}
+
+
+def _positive_int(value):
+    """严格正整数判定（bool 不是整数，题面 Q2 规范 4/5）。"""
+    return (isinstance(value, int) and not isinstance(value, bool)
+            and value > 0)
+
+
+def _parse_json_damage_line(s):
+    """解析 JSON 行 -> [(armor, damage, id)]；id 可选，非法返回 []。"""
+    try:
+        data = json.loads(s)
+    except Exception:
+        return []
+    if not isinstance(data, dict):
+        return []
+    armor = data.get("armor")
+    damage = data.get("damage")
+    if armor not in ("front", "left", "right"):
+        return []
+    if not _positive_int(damage):
+        return []
+    if "id" in data:
+        event_id = data["id"]
+        if not isinstance(event_id, int) or isinstance(event_id, bool):
+            return []
+    else:
+        event_id = None
+    return [(armor, damage, event_id)]
+
+
+def _parse_sensor_damage_line(s):
+    """解析传感器行 "F:32,L:5,R:12" -> [(armor, damage, None), ...]。
+
+    每个分段各计一次事件；任一分段非法则整行作脏行（题面 Q2 规范 5）。
+    """
+    events = []
+    for seg in s.split(","):
+        key_str, sep, val_str = seg.partition(":")
+        if not sep:
+            return []
+        key_str = key_str.strip()
+        val_str = val_str.strip()
+        if key_str not in _SENSOR_KEY_TO_ARMOR or not val_str.isdigit():
+            return []
+        damage = int(val_str)
+        if damage <= 0:
+            return []
+        events.append((_SENSOR_KEY_TO_ARMOR[key_str], damage, None))
+    return events
+
+
 def analyze_damage_log(lines):
     """TODO(Q2)：解析混合格式伤害日志，返回固定契约的统计 dict；
     行格式、去重与统计口径见题面 Q2 规范。"""
     total_damage = 0
-    by_armor = {"front": 0,"left": 0,"right": 0}
-    seen_id = set()
+    by_armor = {"front": 0, "left": 0, "right": 0}
+    seen_ids = set()
     event_count = 0
     for line in lines:
-        s = line.strip()
-        if len(s) ==0 or s.startswith("#"):
-            continue
+        s = line.strip() if isinstance(line, str) else ""
+        if not s or s.startswith("#"):
+            continue  # 脏行：空行 / 注释
         if s.startswith("{"):
-            try:
-                data= json.loads(s)
-                if "armor" not in data or "damage" not in data or "id" not in data:
-                    continue
-                armor = data["armor"]
-                damage = data["damage"]
-                if armor not in ["front", "left", "right"]:
-                    continue
-                if not isinstance(damage, int) or damage < 0:
-                    continue
-                if "id" in data:
-                    event_id = data["id"]
-                    if event_id in seen_id:
-                        continue
-                    seen_id.add(event_id)
-                total_damage += damage
-                by_armor[armor] += damage
-                event_count += 1
-            except Exception:
-                continue
+            events = _parse_json_damage_line(s)
         else:
-            parts = s.split()
-            valid_sensor = True
-            temp_dict = {"front":0, "left":0, "right":0}
-            for p in parts:
-                seg = p.strip()
-                if ":" not in seg:
-                    valid_sensor = False
-                    break
-                key_str, val_str = seg.split(":", 1)
-                key_str = key_str.strip()
-                val_str = val_str.strip()
-                if not val_str.isdigit():
-                    valid_sensor = False
-                    break
-                dmg = int(val_str)
-                if dmg <= 0:
-                    valid_sensor = False
-                    break
-                if key_str == "F":
-                    temp_dict["front"] += dmg
-                elif key_str == "L":
-                    temp_dict["left"] += dmg
-                elif key_str == "R":
-                    temp_dict["right"] += dmg
-                else:
-                    valid_sensor = False
-                    break
-            if not valid_sensor:
-                continue
-            for pos in ["front","left","right"]:
-                d = temp_dict[pos]
-                if d > 0:
-                    total += d
-                    by_armor[pos] += d
-                    event_count +=1
-        most_hit = None
-        avg = 0.0
-        if event_count > 0:
-            avg = total_damage / event_count
-            max_val = max(by_armor.values())
-            if max_val > 0:
-                if by_armor["front"] == max_val:
-                    most_hit = "front"
-                elif by_armor["left"] == max_val:
-                    most_hit = "left"
-                else:
-                    most_hit = "right"
+            events = _parse_sensor_damage_line(s)
+        if not events:
+            continue  # 脏行：无法解析 / 字段非法
+        for armor, damage, event_id in events:
+            if event_id is not None:
+                if event_id in seen_ids:
+                    continue  # 规范 6：同一 id 只计第一次出现
+                seen_ids.add(event_id)
+            total_damage += damage
+            by_armor[armor] += damage
+            event_count += 1
 
-    result = {
-        "total": total,
+    most_hit = None
+    if event_count > 0:
+        max_val = max(by_armor.values())
+        if max_val > 0:
+            if by_armor["front"] == max_val:
+                most_hit = "front"
+            elif by_armor["left"] == max_val:
+                most_hit = "left"
+            else:
+                most_hit = "right"
+    avg = round(total_damage / event_count, 2) if event_count else 0.0
+    return {
+        "total": total_damage,
         "by_armor": by_armor,
         "most_hit": most_hit,
-        "avg": avg
+        "avg": avg,
     }
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -254,37 +260,37 @@ class SentryGrid:
         """TODO(Q3)：朝当前 facing 前进一格，返回执行后的位置；
         碰撞、耗电与断电语义见题面 Q3 规范。"""
         if self._fuel <= 0:
-            return self._pos
-        self._fuel -=1
+            return self._pos  # 断电：前进尝试不产生位移
+        self._fuel -= 1
         dx, dy = self._facing.delta
         nx, ny = self._pos[0] + dx, self._pos[1] + dy
         if self.is_blocked(nx, ny):
-            self._collision_count += 1
+            self._collision_count += 1  # 碰撞：位置与朝向均不变
             return self._pos
-        raise NotImplementedError("Q3 move_forward：题面 Q3·前进、碰撞与断电")
+        self._pos = (nx, ny)  # 前方可通行：移动到该格
+        return self._pos
 
     def turn_left(self):
         """TODO(Q3)：原地左转 90°，返回新的 Facing（不耗电）。"""
         left_of = {
-                Facing.UP: Facing.LEFT,
-                Facing.LEFT: Facing.DOWN,
-                Facing.DOWN: Facing.RIGHT,
-                Facing.RIGHT: Facing.UP
-            }
+            Facing.UP: Facing.LEFT,
+            Facing.LEFT: Facing.DOWN,
+            Facing.DOWN: Facing.RIGHT,
+            Facing.RIGHT: Facing.UP
+        }
         self._facing = left_of[self._facing]
         return self._facing
 
     def turn_right(self):
         """TODO(Q3)：原地右转 90°，返回新的 Facing（不耗电）。"""
         right_of = {
-                Facing.UP: Facing.RIGHT,
-                Facing.RIGHT: Facing.DOWN,
-                Facing.DOWN: Facing.LEFT,
-                Facing.LEFT: Facing.UP
-            }
+            Facing.UP: Facing.RIGHT,
+            Facing.RIGHT: Facing.DOWN,
+            Facing.DOWN: Facing.LEFT,
+            Facing.LEFT: Facing.UP
+        }
         self._facing = right_of[self._facing]
         return self._facing
-        raise NotImplementedError("Q3 turn_right")
 
 
 # ---------------------------------------------------------------------------
@@ -293,20 +299,20 @@ class SentryGrid:
 def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
     """TODO(Q4)：返回下一步应朝向的 Facing；
     候选判定、优先级与回退规则见题面 Q4 规范。"""
-    x,y = pos
+    x, y = pos
     tx, ty = target
     dx = tx - x
     dy = ty - y
     before = abs(dx) + abs(dy)
     if before == 0:
         return current_facing
-    x_dir = Facing.RIGHT if dx > 0 else Facing.LEFT 
+    x_dir = Facing.RIGHT if dx > 0 else Facing.LEFT
     y_dir = Facing.UP if dy > 0 else Facing.DOWN
-    axis_order =("x","y") if abs(dx) >= abs(dy) else ("y","x")
+    axis_order = ("x", "y") if abs(dx) >= abs(dy) else ("y", "x")
     for axis in axis_order:
-        if axis =='x'and dx == 0:
+        if axis == 'x' and dx == 0:
             continue
-        if axis =='y'and dy == 0:
+        if axis == 'y' and dy == 0:
             continue
         facing = x_dir if axis == "x" else y_dir
         fx, fy = facing.delta
@@ -320,6 +326,8 @@ def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
 # ---------------------------------------------------------------------------
 # Q5 哨兵决策机（题面 Q5·裁判系统决策规则表）
 # ---------------------------------------------------------------------------
+
+
 class SentryState(Enum):
     """哨兵状态机（已提供，勿改）。"""
 
@@ -328,6 +336,7 @@ class SentryState(Enum):
     ENGAGE = "ENGAGE"
     RETREAT = "RETREAT"
     RETURN = "RETURN"
+    
 
 
 def decide(sensor, state, hp, heat):
