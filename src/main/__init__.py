@@ -336,14 +336,57 @@ class SentryState(Enum):
     ENGAGE = "ENGAGE"
     RETREAT = "RETREAT"
     RETURN = "RETURN"
-    
+
 
 
 def decide(sensor, state, hp, heat):
     """TODO(Q5)：纯函数决策，返回 (action: str, new_state: SentryState)；
     sensor 字段契约、R1-R7 规则表与非法输入处理见题面 Q5 规范。"""
-    raise NotImplementedError("Q5 decide：题面 Q5·决策规则表 R1-R7")
-
+    required = ("enemy_frames", "enemy_dist", "robot_type", "max_hp")
+    if not isinstance(sensor, dict) or any(k not in sensor for k in required):
+        raise ValueError("sensor 缺少必要字段") 
+    if not isinstance(state, SentryState):
+        raise ValueError("state 必须是 SentryState")
+    frames = sensor["enemy_frames"]  
+    if not isinstance(frames, (tuple, list)) or not (1 <= len(frames) <= 6):
+        raise ValueError("enemy_frames 长度必须为 1-6")
+    frames = tuple(bool(item) for item in frames)
+    visible = frames[-1]
+    enemy_dist = sensor["enemy_dist"]
+    if type(enemy_dist) is not int:
+        enemy_dist = None
+    robot_type = sensor["robot_type"]
+    if robot_type not in ("INFANTRY", "HERO"):
+        robot_type = "INFANTRY"
+    hp_pct = hp_ratio(hp, sensor["max_hp"])
+    def engage_action():
+        if enemy_dist is not None and enemy_dist <= 3:
+            return "SHOOT"
+        if robot_type == "HERO":
+            return "MOVE_RIGHT"
+        return "MOVE_LEFT"
+        if hp_pct <= 30:
+            return ("RETREAT", SentryState.RETREAT)
+        if state is SentryState.RETREAT:
+            return ("RETURN", SentryState.RETURN)
+        if state is SentryState.RETURN:
+            return ("MOVE_BASE", SentryState.PATROL)
+        if state is SentryState.ENGAGE:
+            if visible:
+                return (engage_action(), SentryState.ENGAGE)
+        if any(frames[:-1]):
+            return ("HOLD_FIRE", SentryState.ENGAGE) 
+        return ("SCAN", SentryState.SUSPECT)
+        if state in (SentryState.PATROL, SentryState.SUSPECT):
+            if visible:
+                confirmed = len(frames) >= 2 and frames[-2] and frames[-1]
+                if confirmed:
+                    return (engage_action(), SentryState.ENGAGE)
+            return ("SCAN", SentryState.SUSPECT)
+            if state is SentryState.PATROL:
+                return ("PATROL_MOVE", SentryState.PATROL)
+            return ("SCAN", SentryState.SUSPECT)
+        raise ValueError("未知状态") 
 
 # ---------------------------------------------------------------------------
 # Q6 巡逻任务（题面 Q6·巡逻契约与验收阈值）
