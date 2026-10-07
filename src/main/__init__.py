@@ -14,17 +14,6 @@ import json
 from collections import deque
 from enum import Enum
 
-# ---------------------------------------------------------------------------
-# Rule thresholds (from the problem statement), named once for readability.
-# ---------------------------------------------------------------------------
-BATTERY_OK_MIN = 50       # battery > this: "OK", else "WARNING" above LOW
-BATTERY_LOW_MAX = 20      # battery <= this: "LOW"
-RETREAT_HP_PCT = 30       # R1: retreat at or below this hp percentage
-ENGAGE_DIST = 3           # R4/R6: shoot at or below this enemy distance
-FRAMES_MIN = 1            # R-contract: enemy_frames length bounds
-FRAMES_MAX = 6
-WALL_HAND_LIMIT = 32      # Q6: wall-follow steps before swapping hands
-
 
 # ---------------------------------------------------------------------------
 # 仿真世界基础（已提供，勿改）
@@ -49,26 +38,25 @@ class Facing(Enum):
 def hp_ratio(hp, max_hp):
     """TODO(Q1)：血量百分比，返回 0-100 的 int；计算与边界规则见题面 Q1 规范。"""
     if not isinstance(hp, (int, float)) or isinstance(hp, bool):
-        raise TypeError("hp 必须为数值")
+        raise TypeError("hp 必须为数值") # 校验血量参数合法性
     if not isinstance(max_hp, (int, float)) or isinstance(max_hp, bool):
         raise TypeError("max_hp 必须为数值")
     if max_hp <= 0:
         raise ValueError("max_hp 必须为正数")
-    # Defensive normalization: clamp out-of-range input into 0-100 (Q5 rule)
-    ratio = hp / max_hp * 100
+    ratio = hp / max_hp * 100  # 防御式规范化：越界值夹回 0-100（题面 Q5 口径）
     return max(0, min(100, int(ratio)))
+# 夹紧结果，保证百分比落在0‑100区间，防止异常输入溢出
 
 
 def status_report(name, robot_type, hp, max_hp, battery):
     """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
     if not isinstance(name, str) or not isinstance(robot_type, str):
         raise TypeError("name 和 robot_type 必须为字符串")
-    pct = hp_ratio(hp, max_hp)
-    # hp/max_hp validation and normalization are delegated to hp_ratio
+    pct = hp_ratio(hp, max_hp)  # hp/max_hp 合法性与规范化统一交给 hp_ratio
     battery = int(battery)
-    if battery > BATTERY_OK_MIN:
+    if battery > 50:
         gear = "OK"
-    elif battery > BATTERY_LOW_MAX:
+    elif battery > 20:
         gear = "WARNING"
     else:
         gear = "LOW"
@@ -82,13 +70,13 @@ _SENSOR_KEY_TO_ARMOR = {"F": "front", "L": "left", "R": "right"}
 
 
 def _positive_int(value):
-    """Strictly positive int check (bool is not an int; Q2 rules 4/5)."""
+    """严格正整数判定（bool 不是整数，题面 Q2 规范 4/5）。"""
     return (isinstance(value, int) and not isinstance(value, bool)
             and value > 0)
 
 
 def _parse_json_damage_line(s):
-    """Parse a JSON line -> [(armor, damage, id)]; optional id, [] if bad."""
+    """解析 JSON 行 -> [(armor, damage, id)]；id 可选，非法返回 []。"""
     try:
         data = json.loads(s)
     except Exception:
@@ -111,10 +99,9 @@ def _parse_json_damage_line(s):
 
 
 def _parse_sensor_damage_line(s):
-    """Parse a sensor line "F:32,L:5,R:12" -> [(armor, damage, None), ...].
+    """解析传感器行 "F:32,L:5,R:12" -> [(armor, damage, None), ...]。
 
-    Each segment counts as one event; any invalid segment turns the
-    whole line into a dirty line (Q2 rule 5).
+    每个分段各计一次事件；任一分段非法则整行作脏行（题面 Q2 规范 5）。
     """
     events = []
     for seg in s.split(","):
@@ -136,23 +123,24 @@ def analyze_damage_log(lines):
     """TODO(Q2)：解析混合格式伤害日志，返回固定契约的统计 dict；
     行格式、去重与统计口径见题面 Q2 规范。"""
     total_damage = 0
+    # 统一累加伤害与计数，复用逻辑，避免重复代码 
     by_armor = {"front": 0, "left": 0, "right": 0}
     seen_ids = set()
     event_count = 0
     for line in lines:
         s = line.strip() if isinstance(line, str) else ""
         if not s or s.startswith("#"):
-            continue  # dirty line: blank or comment
+            continue  # 脏行：空行 / 注释
         if s.startswith("{"):
             events = _parse_json_damage_line(s)
         else:
             events = _parse_sensor_damage_line(s)
         if not events:
-            continue  # dirty line: unparsable or invalid field
+            continue  # 脏行：无法解析 / 字段非法
         for armor, damage, event_id in events:
             if event_id is not None:
                 if event_id in seen_ids:
-                    continue  # rule 6: count only the first id occurrence
+                    continue  # 规范 6：同一 id 只计第一次出现
                 seen_ids.add(event_id)
             total_damage += damage
             by_armor[armor] += damage
@@ -204,9 +192,9 @@ class SentryGrid:
         self._facing = facing
         self._fuel = int(fuel)
         self._collision_count = 0
-        # Reuse the current_pos setter so start_pos gets the same type check
-        # and obstacle validation as later assignments (Q3 rule 1).
-        self.current_pos = start_pos
+        self._pos = self._clamp_cell(start_pos)
+        if self._pos in self._obstacles:
+            raise ValueError("start_pos 不能位于障碍物上")
 
     def _clamp_cell(self, cell):
         """已提供：元素转 int 并夹回地图范围（供 __init__ 使用）。"""
@@ -271,18 +259,20 @@ class SentryGrid:
             raise ValueError("current_pos 不能位于障碍物上")
         self._pos = pos
 
+    # 电量耗尽底盘断电，不再执行任何位移
+
     def move_forward(self):
         """TODO(Q3)：朝当前 facing 前进一格，返回执行后的位置；
         碰撞、耗电与断电语义见题面 Q3 规范。"""
         if self._fuel <= 0:
-            return self._pos  # out of fuel: no displacement
+            return self._pos  # 断电：前进尝试不产生位移
         self._fuel -= 1
         dx, dy = self._facing.delta
         nx, ny = self._pos[0] + dx, self._pos[1] + dy
         if self.is_blocked(nx, ny):
-            self._collision_count += 1  # collision: pos and facing hold
+            self._collision_count += 1  # 碰撞：位置与朝向均不变
             return self._pos
-        self._pos = (nx, ny)  # free cell ahead: move onto it
+        self._pos = (nx, ny)  # 前方可通行：移动到该格
         return self._pos
 
     def turn_left(self):
@@ -321,23 +311,21 @@ def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
     before = abs(dx) + abs(dy)
     if before == 0:
         return current_facing
-    # Rule 2: prefer the axis with the larger absolute coordinate delta;
-    # a zero delta on an axis yields no candidate for that axis.
     x_dir = Facing.RIGHT if dx > 0 else Facing.LEFT
     y_dir = Facing.UP if dy > 0 else Facing.DOWN
-    candidates = ((x_dir, dx), (y_dir, dy))
-    if abs(dx) < abs(dy):
-        candidates = tuple(reversed(candidates))
-    # Rule 1: the cell must be free and strictly reduce the manhattan
-    # distance; ties never qualify (Q4 rules 1-2).
-    for facing, delta in candidates:
-        if delta == 0:
+    axis_order = ("x", "y") if abs(dx) >= abs(dy) else ("y", "x")
+    for axis in axis_order:
+        if axis == 'x' and dx == 0:
             continue
+        if axis == 'y' and dy == 0:
+            continue
+        facing = x_dir if axis == "x" else y_dir
         fx, fy = facing.delta
         nxt = (x + fx, y + fy)
-        if nxt not in obstacles and abs(nxt[0] - tx) + abs(nxt[1] - ty) < before:
+        after = abs(nxt[0] - tx) + abs(nxt[1] - ty)
+        if after < before and nxt not in obstacles:
             return facing
-    # Rule 3: no candidate at all -> keep the current facing
+
     return current_facing
 
 # ---------------------------------------------------------------------------
@@ -358,59 +346,58 @@ class SentryState(Enum):
 def decide(sensor, state, hp, heat):
     """TODO(Q5)：纯函数决策，返回 (action: str, new_state: SentryState)；
     sensor 字段契约、R1-R7 规则表与非法输入处理见题面 Q5 规范。"""
-    # ---- Input contract: out-of-contract inputs get rejected ----
+    # ---- 输入契约：契约之外（缺失字段 / 非法 state / 帧历史长度越界）----
     required = ("enemy_frames", "enemy_dist", "robot_type", "max_hp")
     if not isinstance(sensor, dict) or any(k not in sensor for k in required):
         raise ValueError("sensor 缺少必要字段")
     if not isinstance(state, SentryState):
         raise ValueError("state 必须是 SentryState")
     frames = sensor["enemy_frames"]
-    if (not isinstance(frames, (tuple, list))
-            or not (FRAMES_MIN <= len(frames) <= FRAMES_MAX)):
+    if not isinstance(frames, (tuple, list)) or not (1 <= len(frames) <= 6):
         raise ValueError("enemy_frames 长度必须为 1-6")
 
-    # ---- Defensive normalization: bad values never raise (Q5) ----
+    # ---- 防御式规范化：字段存在但取值非法时不抛异常（题面 Q5 末段）----
     frames = tuple(bool(item) for item in frames)
-    visible = frames[-1]  # visible = last frame (current) is truthy
+    visible = frames[-1]  # 可见 = 帧历史末位（当前帧）为真
     enemy_dist = sensor["enemy_dist"]
     if type(enemy_dist) is not int:
-        enemy_dist = None  # non-int distance is treated as unknown
+        enemy_dist = None  # 非整数敌距按不可知处理
     robot_type = sensor["robot_type"]
     if robot_type not in ("INFANTRY", "HERO"):
-        robot_type = "INFANTRY"  # invalid type falls back to infantry
+        robot_type = "INFANTRY"  # 非法机型按步兵处理
     hp_pct = hp_ratio(hp, sensor["max_hp"])
 
     def engage_action():
-        """Shared R4/R6 combat test: shoot at dist <= 3, else sidestep."""
-        if enemy_dist is not None and enemy_dist <= ENGAGE_DIST:
+        """R4/R6 共用的交火判定：敌距 <=3 开火，否则按机型横移。"""
+        if enemy_dist is not None and enemy_dist <= 3:
             return "SHOOT"
         if robot_type == "HERO":
             return "MOVE_RIGHT"
         return "MOVE_LEFT"
 
-    # ---- Rule table: evaluate R1-R7 in order, first match wins ----
-    # R1 survival first: overrides all, even point-blank combat
-    if hp_pct <= RETREAT_HP_PCT:
+    # ---- 规则表：按 R1-R7 固定顺序求值，首条命中即返回 ----
+    # R1 保命优先：优先于包括贴脸交火在内的其余全部规则
+    if hp_pct <= 30:
         return ("RETREAT", SentryState.RETREAT)
-    # R2 retreat hold: leave retreat once hp recovers
+    # R2 撤退保持：恢复到安全血量后转出撤退
     if state is SentryState.RETREAT:
         return ("RETURN", SentryState.RETURN)
-    # R3 single-frame return: RETURN ignores vision, distance, heat
+    # R3 返航单帧：RETURN 为单帧过渡状态，与可见性/敌距/热量均无关
     if state is SentryState.RETURN:
         return ("MOVE_BASE", SentryState.PATROL)
-    # R4 engage decision / R5 engage hold
+    # R4 交火决策 / R5 交火保持
     if state is SentryState.ENGAGE:
         if visible:
             return (engage_action(), SentryState.ENGAGE)  # R4
-        if any(frames[:-1]):  # any earlier true frame = brief loss
+        if any(frames[:-1]):  # 帧历史里仍有真帧 = 短暂丢失
             return ("HOLD_FIRE", SentryState.ENGAGE)  # R5
-        return ("SCAN", SentryState.SUSPECT)  # R5 sustained loss
-    # R6 enemy confirmation / R7 defaults (PATROL and SUSPECT)
+        return ("SCAN", SentryState.SUSPECT)  # R5 持续丢失
+    # R6 敌情确认 / R7 默认行为（PATROL 与 SUSPECT）
     if state in (SentryState.PATROL, SentryState.SUSPECT):
         if visible:
-            if len(frames) >= 2 and frames[-2]:  # two true frames = seen
+            if len(frames) >= 2 and frames[-2]:  # 末两位全真 = 敌情确认
                 return (engage_action(), SentryState.ENGAGE)  # R6
-            return ("SCAN", SentryState.SUSPECT)  # R6 unconfirmed sight
+            return ("SCAN", SentryState.SUSPECT)  # R6 单帧可见未确认
         if state is SentryState.PATROL:
             return ("PATROL_MOVE", SentryState.PATROL)  # R7
         return ("SCAN", SentryState.SUSPECT)  # R7
@@ -420,7 +407,7 @@ def decide(sensor, state, hp, heat):
 # ---------------------------------------------------------------------------
 # Q6 巡逻任务（题面 Q6·巡逻契约与验收阈值）
 # ---------------------------------------------------------------------------
-# Turn tables for wall-following (left-hand rule favors the wall side)
+# 沿墙脱困用的旋转表（左手规则 = 优先贴墙侧转向）
 _TURN_LEFT = {Facing.UP: Facing.LEFT, Facing.LEFT: Facing.DOWN,
               Facing.DOWN: Facing.RIGHT, Facing.RIGHT: Facing.UP}
 _TURN_RIGHT = {Facing.UP: Facing.RIGHT, Facing.RIGHT: Facing.DOWN,
@@ -428,12 +415,12 @@ _TURN_RIGHT = {Facing.UP: Facing.RIGHT, Facing.RIGHT: Facing.DOWN,
 
 
 def _manhattan(a, b):
-    """Manhattan distance between two cells."""
+    """两点间曼哈顿距离。"""
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
 def _has_greedy_candidate(grid):
-    """True when greedy still has a strictly distance-reducing neighbor."""
+    """Q4 贪心是否失速：四邻域是否存在严格减距的可通行格（题面 Q6 规范 1）。"""
     pos = grid.current_pos
     target = grid.enemy_pos
     direction = next_step_toward(pos, target, grid.obstacles, grid.facing)
@@ -444,7 +431,7 @@ def _has_greedy_candidate(grid):
 
 
 def _face_toward(grid, direction):
-    """Rotate in place to face direction (left turn when 3 rights away)."""
+    """原地旋转把朝向对齐到 direction（差 3 步时改用一次左转，省两步）。"""
     rights = {Facing.UP: 0, Facing.RIGHT: 1, Facing.DOWN: 2, Facing.LEFT: 3}
     diff = (rights[direction] - rights[grid.facing]) % 4
     if diff == 3:
@@ -454,80 +441,68 @@ def _face_toward(grid, direction):
             grid.turn_right()
 
 
-def _wall_escape_step(grid, hand):
-    """One wall-following turn decision (left-hand/right-hand rule).
-
-    Priority: turn toward the wall side when open; if the front is
-    blocked and the opposite side is open, turn that way; turn around
-    when all three are blocked; otherwise keep going straight.
-    No return value; turn side effects only.
-    """
-    side = _TURN_LEFT[grid.facing] if hand == "L" else _TURN_RIGHT[grid.facing]
-    other = _TURN_RIGHT[grid.facing] if hand == "L" else _TURN_LEFT[grid.facing]
-    side_cell = (grid.current_pos[0] + side.delta[0],
-                 grid.current_pos[1] + side.delta[1])
-    front_cell = (grid.current_pos[0] + grid.facing.delta[0],
-                  grid.current_pos[1] + grid.facing.delta[1])
-    other_cell = (grid.current_pos[0] + other.delta[0],
-                  grid.current_pos[1] + other.delta[1])
-    if not grid.is_blocked(*side_cell):
-        grid.turn_left() if hand == "L" else grid.turn_right()
-    elif grid.is_blocked(*front_cell):
-        if not grid.is_blocked(*other_cell):
-            grid.turn_right() if hand == "L" else grid.turn_left()
-        else:
-            grid.turn_right()
-            grid.turn_right()
-    # Front open and wall side blocked: keep going straight
-
-
 def run_patrol(grid, max_steps=500):
     """TODO(Q6)：sense → decide → act 主循环；
     循环结构、终止条件、脱困自由度与统计返回契约见题面 Q6 规范。"""
     steps = 0
     visited = set()
-    # ---- Escape state (wall-following): tuning knobs live here ----
-    wall_mode = False      # wall-following escape active
-    hand = "L"             # wall side: left first, swap on timeout
-    wall_steps = 0         # steps walked in this wall stretch
-    entry_dist = 0         # manhattan distance at escape entry
-    # hand-swap threshold (tuned on the 200-seed suite)
-    hand_limit = WALL_HAND_LIMIT
-    # Forced wall-mode exit threshold: 2x the hand-swap threshold.
-    # The 32/64 pair measured 96.5% success / 0.00 collisions / 1.20
-    # step ratio over 200 seeds; all three thresholds pass (Q6 rule 7).
+    # ---- 脱困状态（沿墙走）：参数是主要调参点，改这里 ----
+    wall_mode = False      # 是否处于沿墙脱困
+    hand = "L"             # 沿墙的手：先左手，超时换右手（题面提到的"换手"）
+    wall_steps = 0         # 本段沿墙已走步数
+    entry_dist = 0         # 进入脱困时的曼哈顿距离（出口判据用）
+    hand_limit = 32  # TODO(调参)：换手阈值
+    # 强制退出脱困阈值：2× 换手阈值。32/64 组合在 200 seed 上实测
+    # 96.5% / 0.00 碰撞 / 步数比 1.20，三项阈值全过（题面 Q6 规范 7）
     wall_limit = 2 * hand_limit
     while steps < max_steps and grid.fuel > 0 and not grid.found_enemy:
         pos = grid.current_pos
         visited.add(pos)
-        # ---- sense: did greedy stall? ----
+        # ---- sense：贪心是否失速 ----
         if not wall_mode and not _has_greedy_candidate(grid):
-            wall_mode = True   # enter wall-following escape
+            wall_mode = True   # 切入沿墙脱困
             hand = "L"
             wall_steps = 0
             entry_dist = _manhattan(pos, grid.enemy_pos)
-        # ---- decide: pick this step's direction ----
+        # ---- decide：确定本步方向 ----
         if wall_mode:
-            _wall_escape_step(grid, hand)
+            side = _TURN_LEFT[grid.facing] if hand == "L" else _TURN_RIGHT[grid.facing]
+            other = _TURN_RIGHT[grid.facing] if hand == "L" else _TURN_LEFT[grid.facing]
+            side_cell = (pos[0] + side.delta[0], pos[1] + side.delta[1])
+            front_cell = (pos[0] + grid.facing.delta[0],
+                          pos[1] + grid.facing.delta[1])
+            other_cell = (pos[0] + other.delta[0], pos[1] + other.delta[1])
+            if not grid.is_blocked(*side_cell):
+                # 墙侧空：贴墙转过去（左手/右手规则核心）
+                grid.turn_left() if hand == "L" else grid.turn_right()
+            elif grid.is_blocked(*front_cell):
+                if not grid.is_blocked(*other_cell):
+                    # 正前堵死、另一侧空：朝另一侧转
+                    grid.turn_right() if hand == "L" else grid.turn_left()
+                else:
+                    # 三个方向全堵：掉头
+                    grid.turn_right()
+                    grid.turn_right()
+            # 正前可走且墙侧堵：保持朝向直行
         else:
             direction = next_step_toward(pos, grid.enemy_pos,
                                          grid.obstacles, grid.facing)
             _face_toward(grid, direction)
-        # ---- act: face the direction, then advance one cell ----
+        # ---- act：对齐后前进一格 ----
         grid.move_forward()
         steps += 1
-        # ---- escape exit tests ----
+        # ---- 脱困出口判定 ----
         if wall_mode:
             wall_steps += 1
             dist = _manhattan(grid.current_pos, grid.enemy_pos)
             if wall_steps > wall_limit:
-                wall_mode = False            # too long: force greedy
+                wall_mode = False            # 沿墙太久：强制回贪心
             elif wall_steps > hand_limit and hand == "L":
-                hand = "R"                   # left timed out: swap
+                hand = "R"                   # 左手超时：换右手
                 wall_steps = 0
             elif (_has_greedy_candidate(grid)
                     and dist < entry_dist + 1):
-                wall_mode = False            # reducible: back to greedy
+                wall_mode = False            # 距离重新可缩短：切回贪心
     visited.add(grid.current_pos)
     return {
         "steps": steps,
@@ -540,7 +515,7 @@ def run_patrol(grid, max_steps=500):
 
 def report_to_json(stats):
     """TODO(Q6)：把 stats 序列化为确定性的 JSON 字符串，见题面 Q6 规范。"""
-    # Determinism trio: sorted keys + compact separators + fixed ascii mode
+    # 确定性三要素：键排序 + 紧凑分隔符 + 固定的非 ASCII 处理
     return json.dumps(stats, sort_keys=True,
                       separators=(",", ":"), ensure_ascii=False)
 
@@ -551,11 +526,11 @@ def report_to_json(stats):
 def bfs_path_length(start, target, obstacles):
     """TODO(Bonus)：BFS 全局最短路步数；返回语义与边界职责见题面 Bonus 规范。
 
-    Returns 0 when start == target and -1 when unreachable.
-    Matches the tools reference bfs_len: the start cell is treated
-    as a passable origin even if it lies on an obstacle.
-    Map borders belong to the caller via obstacles (Bonus rule 2);
-    the visited set guarantees termination.
+    start == target 恒返回 0；目标不可达返回 -1。
+    与工具参考实现（tools 的 bfs_len）一致：start 视为可通行起点，
+    即使它与障碍物重合也照常向外搜索。
+    地图边界由调用方放进 obstacles（题面 Bonus 规范 2）；
+    visited 集合保证搜索必然终止。
     """
     start = tuple(start)
     target = tuple(target)
@@ -563,7 +538,7 @@ def bfs_path_length(start, target, obstacles):
         return 0
     blocked = obstacles if isinstance(obstacles, set) else set(obstacles)
     if target in blocked:
-        # Same as exhausting the search; also blocks unbounded flooding
+        # 等价于搜索耗尽返回 -1；无边界环时兼防无限扩散
         return -1
     queue = deque([(start, 0)])
     seen = {start}
