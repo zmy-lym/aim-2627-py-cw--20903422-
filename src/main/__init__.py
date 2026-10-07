@@ -438,6 +438,32 @@ def _face_toward(grid, direction):
             grid.turn_right()
 
 
+def _wall_escape_step(grid, hand):
+    """沿墙走一步的转向决策（左手/右手规则）。
+
+    优先级：墙侧空则贴墙转向；正前堵死时另一侧空则朝另一侧转；
+    三个方向全堵则掉头；否则保持朝向直行。
+    返回值无意义，只产生转向副作用。
+    """
+    side = _TURN_LEFT[grid.facing] if hand == "L" else _TURN_RIGHT[grid.facing]
+    other = _TURN_RIGHT[grid.facing] if hand == "L" else _TURN_LEFT[grid.facing]
+    side_cell = (grid.current_pos[0] + side.delta[0],
+                 grid.current_pos[1] + side.delta[1])
+    front_cell = (grid.current_pos[0] + grid.facing.delta[0],
+                  grid.current_pos[1] + grid.facing.delta[1])
+    other_cell = (grid.current_pos[0] + other.delta[0],
+                  grid.current_pos[1] + other.delta[1])
+    if not grid.is_blocked(*side_cell):
+        grid.turn_left() if hand == "L" else grid.turn_right()
+    elif grid.is_blocked(*front_cell):
+        if not grid.is_blocked(*other_cell):
+            grid.turn_right() if hand == "L" else grid.turn_left()
+        else:
+            grid.turn_right()
+            grid.turn_right()
+    # 正前可走且墙侧堵：保持朝向直行
+
+
 def run_patrol(grid, max_steps=500):
     """TODO(Q6)：sense → decide → act 主循环；
     循环结构、终止条件、脱困自由度与统计返回契约见题面 Q6 规范。"""
@@ -463,24 +489,7 @@ def run_patrol(grid, max_steps=500):
             entry_dist = _manhattan(pos, grid.enemy_pos)
         # ---- decide：确定本步方向 ----
         if wall_mode:
-            side = _TURN_LEFT[grid.facing] if hand == "L" else _TURN_RIGHT[grid.facing]
-            other = _TURN_RIGHT[grid.facing] if hand == "L" else _TURN_LEFT[grid.facing]
-            side_cell = (pos[0] + side.delta[0], pos[1] + side.delta[1])
-            front_cell = (pos[0] + grid.facing.delta[0],
-                          pos[1] + grid.facing.delta[1])
-            other_cell = (pos[0] + other.delta[0], pos[1] + other.delta[1])
-            if not grid.is_blocked(*side_cell):
-                # 墙侧空：贴墙转过去（左手/右手规则核心）
-                grid.turn_left() if hand == "L" else grid.turn_right()
-            elif grid.is_blocked(*front_cell):
-                if not grid.is_blocked(*other_cell):
-                    # 正前堵死、另一侧空：朝另一侧转
-                    grid.turn_right() if hand == "L" else grid.turn_left()
-                else:
-                    # 三个方向全堵：掉头
-                    grid.turn_right()
-                    grid.turn_right()
-            # 正前可走且墙侧堵：保持朝向直行
+            _wall_escape_step(grid, hand)
         else:
             direction = next_step_toward(pos, grid.enemy_pos,
                                          grid.obstacles, grid.facing)
