@@ -204,9 +204,9 @@ class SentryGrid:
         self._facing = facing
         self._fuel = int(fuel)
         self._collision_count = 0
-        self._pos = self._clamp_cell(start_pos)
-        if self._pos in self._obstacles:
-            raise ValueError("start_pos 不能位于障碍物上")
+        # Reuse the current_pos setter so start_pos gets the same type check
+        # and obstacle validation as later assignments (Q3 rule 1).
+        self.current_pos = start_pos
 
     def _clamp_cell(self, cell):
         """已提供：元素转 int 并夹回地图范围（供 __init__ 使用）。"""
