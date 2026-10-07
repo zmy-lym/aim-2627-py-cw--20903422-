@@ -38,7 +38,7 @@ class Facing(Enum):
 def hp_ratio(hp, max_hp):
     """TODO(Q1)：血量百分比，返回 0-100 的 int；计算与边界规则见题面 Q1 规范。"""
     if not isinstance(hp, (int, float)) or isinstance(hp, bool):
-        raise TypeError("hp 必须为数值") # 校验血量参数合法性
+        raise TypeError("hp 必须为数值")  # 校验血量参数合法性
     if not isinstance(max_hp, (int, float)) or isinstance(max_hp, bool):
         raise TypeError("max_hp 必须为数值")
     if max_hp <= 0:
@@ -123,7 +123,7 @@ def analyze_damage_log(lines):
     """TODO(Q2)：解析混合格式伤害日志，返回固定契约的统计 dict；
     行格式、去重与统计口径见题面 Q2 规范。"""
     total_damage = 0
-    # 统一累加伤害与计数，复用逻辑，避免重复代码 
+    # 统一累加伤害与计数，复用逻辑，避免重复代码
     by_armor = {"front": 0, "left": 0, "right": 0}
     seen_ids = set()
     event_count = 0
