@@ -6,3 +6,4 @@ venv/
 .idea/
 .agent-sessions/source/
 .DS_Store
+.agent-sessions/
