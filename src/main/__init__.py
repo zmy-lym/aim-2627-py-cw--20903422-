@@ -321,21 +321,23 @@ def next_step_toward(pos, target, obstacles, current_facing=Facing.UP):
     before = abs(dx) + abs(dy)
     if before == 0:
         return current_facing
+    # Rule 2: prefer the axis with the larger absolute coordinate delta;
+    # a zero delta on an axis yields no candidate for that axis.
     x_dir = Facing.RIGHT if dx > 0 else Facing.LEFT
     y_dir = Facing.UP if dy > 0 else Facing.DOWN
-    axis_order = ("x", "y") if abs(dx) >= abs(dy) else ("y", "x")
-    for axis in axis_order:
-        if axis == 'x' and dx == 0:
+    candidates = ((x_dir, dx), (y_dir, dy))
+    if abs(dx) < abs(dy):
+        candidates = tuple(reversed(candidates))
+    # Rule 1: the cell must be free and strictly reduce the manhattan
+    # distance; ties never qualify (Q4 rules 1-2).
+    for facing, delta in candidates:
+        if delta == 0:
             continue
-        if axis == 'y' and dy == 0:
-            continue
-        facing = x_dir if axis == "x" else y_dir
         fx, fy = facing.delta
         nxt = (x + fx, y + fy)
-        after = abs(nxt[0] - tx) + abs(nxt[1] - ty)
-        if after < before and nxt not in obstacles:
+        if nxt not in obstacles and abs(nxt[0] - tx) + abs(nxt[1] - ty) < before:
             return facing
-
+    # Rule 3: no candidate at all -> keep the current facing
     return current_facing
 
 # ---------------------------------------------------------------------------
