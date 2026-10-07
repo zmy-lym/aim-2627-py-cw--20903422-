@@ -14,6 +14,17 @@ import json
 from collections import deque
 from enum import Enum
 
+# ---------------------------------------------------------------------------
+# Rule thresholds (from the problem statement), named once for readability.
+# ---------------------------------------------------------------------------
+BATTERY_OK_MIN = 50       # battery > this: "OK", else "WARNING" above LOW
+BATTERY_LOW_MAX = 20      # battery <= this: "LOW"
+RETREAT_HP_PCT = 30       # R1: retreat at or below this hp percentage
+ENGAGE_DIST = 3           # R4/R6: shoot at or below this enemy distance
+FRAMES_MIN = 1            # R-contract: enemy_frames length bounds
+FRAMES_MAX = 6
+WALL_HAND_LIMIT = 32      # Q6: wall-follow steps before swapping hands
+
 
 # ---------------------------------------------------------------------------
 # 仿真世界基础（已提供，勿改）
@@ -52,12 +63,12 @@ def status_report(name, robot_type, hp, max_hp, battery):
     """TODO(Q1)：一行自检报告字符串；档位判定与逐字符格式见题面 Q1 规范。"""
     if not isinstance(name, str) or not isinstance(robot_type, str):
         raise TypeError("name 和 robot_type 必须为字符串")
-    # hp/max_hp validation and normalization are delegated to hp_ratio
     pct = hp_ratio(hp, max_hp)
+    # hp/max_hp validation and normalization are delegated to hp_ratio
     battery = int(battery)
-    if battery > 50:
+    if battery > BATTERY_OK_MIN:
         gear = "OK"
-    elif battery > 20:
+    elif battery > BATTERY_LOW_MAX:
         gear = "WARNING"
     else:
         gear = "LOW"
@@ -352,7 +363,8 @@ def decide(sensor, state, hp, heat):
     if not isinstance(state, SentryState):
         raise ValueError("state 必须是 SentryState")
     frames = sensor["enemy_frames"]
-    if not isinstance(frames, (tuple, list)) or not (1 <= len(frames) <= 6):
+    if (not isinstance(frames, (tuple, list))
+            or not (FRAMES_MIN <= len(frames) <= FRAMES_MAX)):
         raise ValueError("enemy_frames 长度必须为 1-6")
 
     # ---- Defensive normalization: bad values never raise (Q5) ----
@@ -368,7 +380,7 @@ def decide(sensor, state, hp, heat):
 
     def engage_action():
         """Shared R4/R6 combat test: shoot at dist <= 3, else sidestep."""
-        if enemy_dist is not None and enemy_dist <= 3:
+        if enemy_dist is not None and enemy_dist <= ENGAGE_DIST:
             return "SHOOT"
         if robot_type == "HERO":
             return "MOVE_RIGHT"
@@ -376,7 +388,7 @@ def decide(sensor, state, hp, heat):
 
     # ---- Rule table: evaluate R1-R7 in order, first match wins ----
     # R1 survival first: overrides all, even point-blank combat
-    if hp_pct <= 30:
+    if hp_pct <= RETREAT_HP_PCT:
         return ("RETREAT", SentryState.RETREAT)
     # R2 retreat hold: leave retreat once hp recovers
     if state is SentryState.RETREAT:
@@ -477,7 +489,8 @@ def run_patrol(grid, max_steps=500):
     hand = "L"             # wall side: left first, swap on timeout
     wall_steps = 0         # steps walked in this wall stretch
     entry_dist = 0         # manhattan distance at escape entry
-    hand_limit = 32  # hand-swap threshold (tuned on the 200-seed suite)
+    # hand-swap threshold (tuned on the 200-seed suite)
+    hand_limit = WALL_HAND_LIMIT
     # Forced wall-mode exit threshold: 2x the hand-swap threshold.
     # The 32/64 pair measured 96.5% success / 0.00 collisions / 1.20
     # step ratio over 200 seeds; all three thresholds pass (Q6 rule 7).
